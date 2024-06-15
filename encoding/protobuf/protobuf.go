@@ -87,11 +87,13 @@ package protobuf
 //                   ...}
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/ast"
 	"cuelang.org/go/cue/build"
 	"cuelang.org/go/cue/errors"
@@ -419,6 +421,66 @@ func Extract(filename string, src interface{}, c *Config) (f *ast.File, err erro
 	}
 	p.file.Filename = filename[:len(filename)-len(".proto")] + "_gen.cue"
 	return p.file, b.Err()
+}
+
+func printField(fieldName string, fieldType string, fieldIndex int, builder *strings.Builder) {
+	builder.WriteString(fmt.Sprintf("\t%v %v = %v;\n", fieldType, fieldName, fieldIndex))
+}
+
+func structToType(name cue.Selector, val cue.Value, builder *strings.Builder) {
+	builder.WriteString(fmt.Sprintf("message %v {\n", strings.TrimPrefix(name.String(), "#")))
+
+	// Iterate through the fields of the struct
+	//it, _ := val.Fields(cue.Optional(true))
+	it, _ := val.Fields(cue.Definitions(true))
+	index := 1
+	for it.Next() {
+		switch k := it.Value().IncompleteKind(); k {
+		case cue.StringKind, cue.FloatKind, cue.BoolKind:
+			printField(it.Selector().String(), fmt.Sprintf("%v", it.Value().IncompleteKind()), index, builder)
+		case cue.IntKind:
+			printField(it.Selector().String(), "int32", index, builder)
+		case cue.StructKind:
+			field, ok := it.Value().Vertex().Conjuncts[0].Source().(*ast.Field)
+			if !ok {
+				builder.WriteString(fmt.Sprintf("#err %v\n", it.Value().IncompleteKind()))
+				break
+			}
+
+			ident, ok := field.Value.(*ast.Ident)
+			if !ok {
+				builder.WriteString(fmt.Sprintf("#err %v\n", it.Value().IncompleteKind()))
+				break
+			}
+
+			printField(it.Selector().Unquoted(), ident.Name[1:], index, builder)
+		default:
+			builder.WriteString(fmt.Sprintf("#err %v\n", it.Value().IncompleteKind()))
+		}
+		index++
+	}
+
+	builder.WriteString("}\n")
+}
+
+func Generate(v cue.Value) (output string, err error) {
+	var stringBuilder strings.Builder
+	stringBuilder.WriteString(fmt.Sprintf("syntax = \"proto3\";\n\n"))
+
+	it, err := v.Fields(cue.Definitions(true))
+	if err != nil {
+		//log.Fatal(err)
+		return "", err
+	}
+	for it.Next() {
+		v := it.Value()
+		if !it.IsDefinition() || v.IncompleteKind() != cue.StructKind {
+			continue
+		}
+		structToType(it.Selector(), it.Value(), &stringBuilder)
+	}
+
+	return stringBuilder.String(), nil
 }
 
 // TODO
