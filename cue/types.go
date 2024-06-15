@@ -546,6 +546,8 @@ type Value struct {
 	parent_ *parent
 }
 
+func (v Value) Vertex() *adt.Vertex { return v.v }
+
 // parent is a distinct type from Value to ensure more type safety: Value
 // is typically used by value, so taking a pointer to it has a high risk
 // or globbering the contents.
