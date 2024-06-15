@@ -26,8 +26,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"cuelang.org/go/cue/ast"
+	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/cue/errors"
 	"cuelang.org/go/cue/format"
+	"cuelang.org/go/cue/load"
+	"cuelang.org/go/encoding/protobuf"
 	"cuelang.org/go/internal/cuetest"
 )
 
@@ -42,13 +45,13 @@ func TestExtractDefinitions(t *testing.T) {
 		t.Run(file, func(t *testing.T) {
 			root := "testdata/istio.io/api"
 			filename := filepath.Join(root, filepath.FromSlash(file))
-			c := &Config{
+			c := &protobuf.Config{
 				Paths: []string{"testdata", root},
 			}
 
 			out := &bytes.Buffer{}
 
-			if f, err := Extract(filename, nil, c); err != nil {
+			if f, err := protobuf.Extract(filename, nil, c); err != nil {
 				fmt.Fprintln(out, err)
 			} else {
 				b, _ := format.Node(f, format.Simplify())
@@ -76,7 +79,7 @@ func TestExtractDefinitions(t *testing.T) {
 func TestBuild(t *testing.T) {
 	cwd, _ := os.Getwd()
 	root := filepath.Join(cwd, "testdata/istio.io/api")
-	c := &Config{
+	c := &protobuf.Config{
 		Root:   root,
 		Module: "istio.io/api@v0",
 		Paths: []string{
@@ -85,7 +88,7 @@ func TestBuild(t *testing.T) {
 		},
 	}
 
-	b := NewExtractor(c)
+	b := protobuf.NewExtractor(c)
 	_ = b.AddFile("networking/v1alpha3/gateway.proto", nil)
 	_ = b.AddFile("mixer/v1/attributes.proto", nil)
 	_ = b.AddFile("mixer/v1/mixer.proto", nil)
@@ -151,5 +154,32 @@ func TestBuild(t *testing.T) {
 
 	for filename := range gotFiles {
 		t.Errorf("did not expect file %q", filename)
+	}
+}
+
+func TestGenerate(t *testing.T) {
+	ctx := cuecontext.New()
+
+	// Load cue from the package in the current directory
+	bis := load.Instances([]string{"testdata/example.cue"}, nil)
+	v := ctx.BuildInstance(bis[0])
+	if err := v.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// load expected output from testdata/example.proto
+	expectedOutput, err := os.ReadFile("testdata/example.proto")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := protobuf.Generate(v)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if output != string(expectedOutput) {
+		t.Errorf("Expected output not as expected, got %s", output)
 	}
 }
